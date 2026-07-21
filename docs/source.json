@@ -1,0 +1,31 @@
+{
+  "name": "Venus Source",
+  "identifier": "com.sliftio.altstore",
+  "subtitle": "Apps pessoais",
+  "iconURL": "https://joseluizfranco.github.io/venus/icon.png",
+  "website": "https://joseluizfranco.github.io/venus/",
+  "tintColor": "#FCB69F",
+  "apps": [
+    {
+      "name": "Venus",
+      "bundleIdentifier": "com.sliftio.venus",
+      "developerName": "José Luiz Franco",
+      "subtitle": "Hello, world — app pessoal.",
+      "localizedDescription": "Venus — app pessoal em React Native / Expo.",
+      "iconURL": "https://joseluizfranco.github.io/venus/icon.png",
+      "tintColor": "#FCB69F",
+      "category": "utilities",
+      "screenshotURLs": [],
+      "versions": [
+        {
+          "version": "1.0.0",
+          "date": "2026-07-20",
+          "localizedDescription": "Primeira versão: hello world em dark theme.",
+          "downloadURL": "https://github.com/JoseLuizFranco/venus/releases/download/v1.0.0/Venus.ipa",
+          "size": 0,
+          "minOSVersion": "15.1"
+        }
+      ]
+    }
+  ]
+}

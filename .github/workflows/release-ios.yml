@@ -1,0 +1,56 @@
+name: Release iOS (.ipa)
+
+# Compila o .ipa na nuvem do EAS e publica como GitHub Release.
+# O source.json aponta para o .ipa dessa release, então a AltStore passa a
+# oferecer a nova versão automaticamente.
+#
+# Pré-requisitos (uma vez):
+#   1. Conta em expo.dev e `eas init` já rodado localmente (projectId no app.json).
+#   2. Credenciais Apple configuradas no EAS (rode `eas build -p ios` uma vez localmente).
+#   3. Secret do repositório: EXPO_TOKEN (expo.dev -> Account -> Access Tokens).
+#
+# Dispare criando uma tag: `git tag v1.0.0 && git push origin v1.0.0`
+# ou manualmente pela aba Actions.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build .ipa on EAS (cloud)
+        id: build
+        run: |
+          URL=$(eas build --platform ios --profile preview --non-interactive --wait --json \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const b=JSON.parse(d);const it=Array.isArray(b)?b[0]:b;console.log(it.artifacts?.applicationArchiveUrl||it.artifacts?.buildUrl||'')})")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Download .ipa
+        run: curl -L -o Venus.ipa "${{ steps.build.outputs.url }}"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Venus.ipa
+          tag_name: ${{ github.ref_name != '' && github.ref_name || 'latest' }}
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
