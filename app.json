@@ -9,7 +9,10 @@
     "backgroundColor": "#0C0C25",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.sliftio.venus"
+      "bundleIdentifier": "com.sliftio.venus",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.sliftio.venus",
@@ -32,6 +35,12 @@
           "backgroundColor": "#0C0C25"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "050028b4-265c-4b95-a2f3-c8b9d60a68c1"
+      }
+    },
+    "owner": "joseluizfranco"
   }
 }

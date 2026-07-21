@@ -1,25 +1,27 @@
 name: Release iOS (.ipa)
 
-# Compila o .ipa na nuvem do EAS e publica como GitHub Release.
-# O source.json aponta para o .ipa dessa release, então a AltStore passa a
-# oferecer a nova versão automaticamente.
+# Compila um .ipa NAO-ASSINADO em um runner macOS do GitHub Actions (gratis para
+# repositorios publicos) e publica como GitHub Release. Nao precisa de conta Apple
+# paga nem de Mac local: a AltStore re-assina o app com o seu Apple ID gratis na
+# hora de instalar.
 #
-# Pré-requisitos (uma vez):
-#   1. Conta em expo.dev e `eas init` já rodado localmente (projectId no app.json).
-#   2. Credenciais Apple configuradas no EAS (rode `eas build -p ios` uma vez localmente).
-#   3. Secret do repositório: EXPO_TOKEN (expo.dev -> Account -> Access Tokens).
+# Ao final, atualiza docs/source.json (versao, data, tamanho, URL) e faz commit,
+# entao o GitHub Pages passa a oferecer a nova versao na AltStore automaticamente.
 #
-# Dispare criando uma tag: `git tag v1.0.0 && git push origin v1.0.0`
-# ou manualmente pela aba Actions.
+# Dispare criando uma tag:  git tag v1.0.0 && git push origin v1.0.0
+# ou manualmente pela aba Actions (gera uma pre-release "dev-N").
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -28,29 +30,88 @@ jobs:
           node-version: 20
           cache: npm
 
-      - uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
       - name: Install dependencies
         run: npm ci
 
-      - name: Build .ipa on EAS (cloud)
-        id: build
-        run: |
-          URL=$(eas build --platform ios --profile preview --non-interactive --wait --json \
-            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const b=JSON.parse(d);const it=Array.isArray(b)?b[0]:b;console.log(it.artifacts?.applicationArchiveUrl||it.artifacts?.buildUrl||'')})")
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+      - name: Prebuild native iOS project
+        run: npx expo prebuild --platform ios --no-install
 
-      - name: Download .ipa
-        run: curl -L -o Venus.ipa "${{ steps.build.outputs.url }}"
+      - name: Install CocoaPods
+        run: cd ios && pod install
+
+      - name: Build unsigned .app
+        run: |
+          SCHEME=$(basename ios/*.xcworkspace .xcworkspace)
+          echo "Scheme: $SCHEME"
+          xcodebuild \
+            -workspace "ios/$SCHEME.xcworkspace" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            build
+
+      - name: Package .ipa
+        run: |
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          echo "App: $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry Venus.ipa Payload
+
+      - name: Compute release metadata
+        id: meta
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="dev-${{ github.run_number }}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -f%z Venus.ipa)" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: Venus.ipa
-          tag_name: ${{ github.ref_name != '' && github.ref_name || 'latest' }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          prerelease: ${{ github.ref_type != 'tag' }}
           fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update AltStore source.json (only on version tags)
+        if: github.ref_type == 'tag'
+        run: |
+          node - "${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.date }}" "${{ steps.meta.outputs.size }}" "${{ steps.meta.outputs.tag }}" <<'EOF'
+          const fs = require('fs');
+          const [version, date, size, tag] = process.argv.slice(2);
+          const path = 'docs/source.json';
+          const src = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const repo = process.env.GITHUB_REPOSITORY;
+          const app = src.apps[0];
+          app.versions.unshift({
+            version,
+            date,
+            localizedDescription: `Versao ${version}.`,
+            downloadURL: `https://github.com/${repo}/releases/download/${tag}/Venus.ipa`,
+            size: Number(size),
+            minOSVersion: '15.1',
+          });
+          // mantem apenas versoes unicas (dedup por version)
+          const seen = new Set();
+          app.versions = app.versions.filter(v => !seen.has(v.version) && seen.add(v.version));
+          fs.writeFileSync(path, JSON.stringify(src, null, 2) + '\n');
+          EOF
+          if ! git diff --quiet docs/source.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add docs/source.json
+            git commit -m "Publica Venus ${{ steps.meta.outputs.version }} na source"
+            git push origin HEAD:main
+          fi
