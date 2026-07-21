@@ -21,14 +21,15 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select a Swift 6.2 Xcode (26.x, avoiding 26.3)
+      - name: Select Xcode 26.4+ (Expo SDK 57 / RN 0.86 requer 26.4 ou superior)
         run: |
           echo "Xcodes disponiveis:"; ls -d /Applications/Xcode_*.app || true
-          for v in 26.2 26.1.1 26.1 26.0.1 26.0; do
+          # Preferimos a versao recomendada (26.6), com fallback ate o minimo (26.4).
+          for v in 26.6 26.5 26.4; do
             if [ -d "/Applications/Xcode_$v.app" ]; then
               sudo xcode-select -s "/Applications/Xcode_$v.app/Contents/Developer"
               echo "Selecionado Xcode_$v"
@@ -36,12 +37,12 @@ jobs:
               exit 0
             fi
           done
-          echo "Nenhum 26.x <= 26.2 encontrado."
+          echo "Nenhum Xcode 26.4+ encontrado no runner."
           exit 1
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.13.0
           cache: npm
 
       - name: Install dependencies
