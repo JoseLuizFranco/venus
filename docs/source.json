@@ -19,10 +19,10 @@
       "versions": [
         {
           "version": "1.0.0",
-          "date": "2026-07-20",
-          "localizedDescription": "Primeira versão: hello world em dark theme.",
+          "date": "2026-09-22",
+          "localizedDescription": "Versao 1.0.0.",
           "downloadURL": "https://github.com/JoseLuizFranco/venus/releases/download/v1.0.0/Venus.ipa",
-          "size": 0,
+          "size": 7605681,
           "minOSVersion": "15.1"
         }
       ]
