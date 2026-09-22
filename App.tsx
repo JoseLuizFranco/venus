@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Platform,
   SafeAreaView,
@@ -11,80 +11,41 @@ import {
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 
 import { CheckRow } from './src/components/CheckRow';
+import { QuickAccess, type Tile } from './src/components/QuickAccess';
 import { ReflectionBlock } from './src/components/ReflectionBlock';
 import { WeekStrip } from './src/components/WeekStrip';
-import {
-  buildMockEvents,
-  CalendarEvent,
-  dateKey,
-  EventsByDate,
-  initialWorkouts,
-  reflection,
-  weather,
-  weekDays,
-  Workout,
-} from './src/mock';
-import { loadDoneIds, saveDoneIds } from './src/storage';
+import { dateKey, MONTHS, weekDays, WEEKDAY_LONG } from './src/dates';
+import { DbProvider, useDb } from './src/db';
+import { toggleEventDone } from './src/db/events';
+import { toggleWorkoutDone } from './src/db/workouts';
+import { useHomeData } from './src/hooks/useHomeData';
+import { useWeather } from './src/hooks/useWeather';
+import { AgendaSheet } from './src/screens/AgendaSheet';
+import { GymSheet } from './src/screens/GymSheet';
+import { ReflectionSheet } from './src/screens/ReflectionSheet';
+import { WeightSheet } from './src/screens/WeightSheet';
 import { colors, space, type } from './src/theme';
 
-const MONTHS = [
-  'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
-];
-
-const WEEKDAY_LONG = [
-  'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
-];
-
-function collectDoneIds(workouts: Workout[], events: EventsByDate): string[] {
-  const ids: string[] = [];
-  workouts.forEach((w) => w.done && ids.push(w.id));
-  Object.values(events).forEach((list) =>
-    list.forEach((e) => e.done && ids.push(e.id)),
-  );
-  return ids;
-}
-
-function applyDone(events: EventsByDate, done: Set<string>): EventsByDate {
-  const out: EventsByDate = {};
-  for (const [key, list] of Object.entries(events)) {
-    out[key] = list.map((e: CalendarEvent) => ({ ...e, done: done.has(e.id) }));
-  }
-  return out;
-}
+type SheetKey = 'gym' | 'agenda' | 'weight' | 'reflection' | null;
 
 export default function App() {
+  return (
+    <DbProvider>
+      <Home />
+    </DbProvider>
+  );
+}
+
+function Home() {
+  const db = useDb();
   const today = useMemo(() => new Date(), []);
   const todayKey = dateKey(today);
   const days = useMemo(() => weekDays(today), [today]);
 
-  const [workouts, setWorkouts] = useState(initialWorkouts);
-  const [events, setEvents] = useState(() => buildMockEvents(today));
+  const data = useHomeData(today);
+  const weather = useWeather();
   const [selectedKey, setSelectedKey] = useState(todayKey);
-  const [hydrated, setHydrated] = useState(false);
-
-  // Hidrata o estado de conclusão salvo (uma vez, na abertura).
-  useEffect(() => {
-    let alive = true;
-    loadDoneIds().then((ids) => {
-      if (!alive) return;
-      if (ids != null) {
-        const done = new Set(ids);
-        setWorkouts((prev) => prev.map((w) => ({ ...w, done: done.has(w.id) })));
-        setEvents((prev) => applyDone(prev, done));
-      }
-      setHydrated(true);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  // Persiste sempre que algo é marcado/desmarcado (após hidratar).
-  useEffect(() => {
-    if (!hydrated) return;
-    saveDoneIds(collectDoneIds(workouts, events));
-  }, [hydrated, workouts, events]);
+  const [sheet, setSheet] = useState<SheetKey>(null);
 
   const selectedDate = useMemo(
     () => days.find((d) => dateKey(d) === selectedKey) ?? today,
@@ -92,29 +53,51 @@ export default function App() {
   );
 
   const eventDays = useMemo(
-    () => new Set(Object.keys(events).filter((k) => events[k].length > 0)),
-    [events],
+    () => new Set(Object.keys(data.events).filter((k) => data.events[k].length > 0)),
+    [data.events],
   );
 
-  const dayEvents = events[selectedKey] ?? [];
-
-  const toggleWorkout = (id: string) =>
-    setWorkouts((prev) =>
-      prev.map((w) => (w.id === id ? { ...w, done: !w.done } : w)),
-    );
-
-  const toggleEvent = (id: string) =>
-    setEvents((prev) => ({
-      ...prev,
-      [selectedKey]: (prev[selectedKey] ?? []).map((e) =>
-        e.id === id ? { ...e, done: !e.done } : e,
-      ),
-    }));
+  const dayEvents = data.events[selectedKey] ?? [];
+  const todayEvents = data.events[todayKey] ?? [];
+  const doneWorkouts = data.workouts.filter((w) => w.doneOn != null).length;
+  const weekEvents = Object.values(data.events).reduce((n, l) => n + l.length, 0);
 
   const selectedLabel =
     selectedKey === todayKey
       ? 'TODAY'
       : `${WEEKDAY_LONG[selectedDate.getDay()].toUpperCase()} ${selectedDate.getDate()}`;
+
+  // Widgets de acesso rápido: valor = estado atual, toque = abre a folha.
+  const tiles: Tile[] = [
+    {
+      key: 'gym',
+      label: 'ACADEMIA',
+      value: `${doneWorkouts}/${data.workouts.length}`,
+      caption: 'this week',
+      onPress: () => setSheet('gym'),
+    },
+    {
+      key: 'agenda',
+      label: 'AGENDA',
+      value: String(todayEvents.length),
+      caption: todayEvents.length === 1 ? 'today' : `today · ${weekEvents} this week`,
+      onPress: () => setSheet('agenda'),
+    },
+    {
+      key: 'weight',
+      label: 'WEIGHT',
+      value: data.weight ? `${data.weight.kg.toFixed(1)}` : '—',
+      caption: data.weight ? `kg · ${data.weight.date}` : 'log today',
+      onPress: () => setSheet('weight'),
+    },
+    {
+      key: 'reflection',
+      label: 'TOGETHER',
+      value: data.daysTogether != null ? String(data.daysTogether) : '—',
+      caption: 'days',
+      onPress: () => setSheet('reflection'),
+    },
+  ];
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -128,23 +111,50 @@ export default function App() {
           <Text style={styles.date}>
             {today.getDate()} {MONTHS[today.getMonth()]}
           </Text>
-          <Text style={styles.temp}>{weather.temp}°</Text>
-          <Text style={styles.condition}>{weather.condition}</Text>
+          <Text style={styles.temp}>
+            {weather.weather ? `${weather.weather.temp}°` : '—'}
+          </Text>
+          <Text style={styles.condition}>
+            {weather.weather
+              ? weather.weather.condition
+              : weather.status === 'denied'
+                ? 'Location off'
+                : weather.status === 'error'
+                  ? 'Weather unavailable'
+                  : 'Loading weather…'}
+          </Text>
+          {weather.weather?.place ? (
+            <Text style={styles.place}>{weather.weather.place.toUpperCase()}</Text>
+          ) : null}
         </View>
 
         <View style={styles.divider} />
 
-        {/* Academia — marcar os treinos */}
+        {/* Acesso rápido — widgets */}
+        <View style={styles.section}>
+          <Text style={styles.overline}>QUICK ACCESS</Text>
+          <QuickAccess tiles={tiles} />
+        </View>
+
+        <View style={styles.divider} />
+
+        {/* Academia — marcar os treinos da semana */}
         <View style={styles.section}>
           <Text style={styles.overline}>ACADEMIA</Text>
-          {workouts.map((w) => (
+          {data.workouts.map((w) => (
             <CheckRow
               key={w.id}
-              done={w.done}
+              done={w.doneOn != null}
               label={w.name}
-              onToggle={() => toggleWorkout(w.id)}
+              onToggle={async () => {
+                await toggleWorkoutDone(db, w.id, today);
+                await data.refresh();
+              }}
             />
           ))}
+          {data.loaded && data.workouts.length === 0 ? (
+            <Text style={styles.empty}>No workouts yet.</Text>
+          ) : null}
         </View>
 
         <View style={styles.divider} />
@@ -166,9 +176,12 @@ export default function App() {
               <CheckRow
                 key={e.id}
                 done={e.done}
-                meta={e.time}
+                meta={e.time ?? undefined}
                 label={e.title}
-                onToggle={() => toggleEvent(e.id)}
+                onToggle={async () => {
+                  await toggleEventDone(db, e.id);
+                  await data.refresh();
+                }}
               />
             ))
           ) : (
@@ -179,14 +192,44 @@ export default function App() {
         <View style={styles.divider} />
 
         {/* Reflection — widget 2 */}
-        <ReflectionBlock
-          hanzi={reflection.hanzi}
-          pinyin={reflection.pinyin}
-          meaning={reflection.meaning}
-          quote={reflection.quote}
-          daysTogether={reflection.daysTogether}
-        />
+        {data.reflection ? (
+          <ReflectionBlock
+            hanzi={data.reflection.hanzi}
+            pinyin={data.reflection.pinyin}
+            meaning={data.reflection.meaning}
+            quote={data.reflection.quote}
+            daysTogether={data.daysTogether ?? 0}
+          />
+        ) : null}
       </ScrollView>
+
+      <GymSheet
+        visible={sheet === 'gym'}
+        onClose={() => setSheet(null)}
+        today={today}
+        workouts={data.workouts}
+        onChanged={data.refresh}
+      />
+      <AgendaSheet
+        visible={sheet === 'agenda'}
+        onClose={() => setSheet(null)}
+        today={today}
+        initialDate={selectedKey}
+        onChanged={data.refresh}
+      />
+      <WeightSheet
+        visible={sheet === 'weight'}
+        onClose={() => setSheet(null)}
+        today={today}
+        onChanged={data.refresh}
+      />
+      <ReflectionSheet
+        visible={sheet === 'reflection'}
+        onClose={() => setSheet(null)}
+        reflection={data.reflection}
+        anniversary={data.anniversary}
+        onChanged={data.refresh}
+      />
     </SafeAreaView>
   );
 }
@@ -219,6 +262,12 @@ const styles = StyleSheet.create({
   condition: {
     fontSize: type.label,
     color: colors.textMuted,
+  },
+  place: {
+    fontSize: type.overline,
+    letterSpacing: 3,
+    color: colors.textFaint,
+    marginTop: 6,
   },
   divider: {
     height: StyleSheet.hairlineWidth,

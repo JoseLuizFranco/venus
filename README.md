@@ -1,6 +1,8 @@
 # Venus 🪐
 
-App pessoal iOS (React Native + Expo). Por enquanto: **hello world** em dark theme.
+App pessoal iOS (React Native + Expo). Home tipográfica em dark theme com widgets de acesso
+rápido (academia, agenda, peso, reflexão) e um banco **SQLite local** (`expo-sqlite`) onde
+tudo é gravado no aparelho — sem backend.
 
 O objetivo é distribuir via **AltStore** usando uma *source* própria, hospedada no
 **GitHub Pages** deste repositório — **sem Mac, sem conta Apple paga**. O `.ipa` é
@@ -10,6 +12,9 @@ e a **AltStore re-assina o app com o seu Apple ID grátis** na instalação.
 ## Stack
 
 - Expo SDK 57 / React Native 0.86 / React 19
+- Banco local: `expo-sqlite` (arquivo `venus.db`, migrações via `PRAGMA user_version`)
+- Clima: localização do iPhone via `expo-location` + Open-Meteo (grátis, sem chave). O WeatherKit
+  da Apple exige o Developer Program pago, incompatível com a distribuição por AltStore.
 - Bundle ID: `com.sliftio.venus`
 - Tema dark `#0C0C25`, logo em `assets/logo.png`
 
@@ -21,7 +26,8 @@ npx expo start
 ```
 
 - **No iPhone:** instale o app **Expo Go** e escaneie o QR code.
-- **No navegador:** tecle `w` no terminal do Expo.
+- **No navegador:** tecle `w` no terminal do Expo. *Obs.: o `expo-sqlite` não roda na web sem
+  configurar o WASM no Metro; use o Expo Go ou o simulador.*
 
 ## Gerar o `.ipa` (grátis, sem Mac e sem conta Apple)
 
@@ -64,10 +70,36 @@ Para publicar uma nova versão:
 ## Estrutura
 
 ```
-App.tsx                     # tela hello world (dark theme + logo)
-app.json                    # config do Expo (nome Venus, dark, bundle id)
+App.tsx                     # home: header, quick access, academia, calendário, reflection
+app.json                    # config do Expo (nome Venus, dark, bundle id, plugin expo-sqlite)
+src/theme.ts                # tokens de design (cores, espaçamento, tipografia)
+src/dates.ts                # helpers de data (YYYY-MM-DD, semana seg→dom)
+src/db/schema.ts            # migrações SQL (workouts, exercises, workout_logs, events,
+                            # weights, reflections, settings)
+src/db/seed.ts              # dados iniciais gravados na primeira abertura
+src/db/index.tsx            # DbProvider (abre o banco, roda migrações + seed) e useDb()
+src/db/{workouts,events,weights,reflection}.ts   # repositórios (queries)
+src/hooks/useHomeData.ts    # carrega tudo que a home mostra + refresh()
+src/weather.ts              # localização atual → Open-Meteo, com cache de 30 min no SQLite
+src/hooks/useWeather.ts     # clima no header; atualiza ao voltar ao primeiro plano
+src/components/             # CheckRow, WeekStrip, QuickAccess, Sheet, Field, TextButton…
+src/screens/                # folhas modais: GymSheet, AgendaSheet, WeightSheet, ReflectionSheet
 assets/logo.png             # logo da Venus
-assets/icon.png             # ícone do app (gerado da logo)
 docs/                       # site do GitHub Pages = source do AltStore
 .github/workflows/          # CI e release do .ipa
 ```
+
+## Dados (SQLite)
+
+Tudo fica em `venus.db` no aparelho. Para mudar o esquema, acrescente uma nova string ao
+final de `MIGRATIONS` em `src/db/schema.ts` — ela roda uma vez e o `user_version` sobe.
+
+| Tabela          | O que guarda                                                   |
+|-----------------|----------------------------------------------------------------|
+| `workouts`      | treinos do split semanal (arquivar em vez de apagar)           |
+| `exercises`     | exercícios por treino: séries, reps, carga (kg)                |
+| `workout_logs`  | um registro por treino concluído numa data (1 por semana na home) |
+| `events`        | compromissos: data, hora opcional, título, feito               |
+| `weights`       | peso corporal, um registro por dia                             |
+| `reflections`   | hanzi/pinyin/significado/frase; só um `active = 1`             |
+| `settings`      | chave/valor — ex.: `anniversary_date` do contador "♡ N days"   |

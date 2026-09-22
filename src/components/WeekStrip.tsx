@@ -1,9 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { dateKey } from '../mock';
+import { dateKey, WEEKDAY_SHORT } from '../dates';
 import { colors, type } from '../theme';
 
-const WEEKDAY = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
 type Props = {
   days: Date[];
@@ -32,7 +31,7 @@ export function WeekStrip({ days, selectedKey, todayKey, eventDays, onSelect }: 
             accessibilityState={{ selected }}
           >
             <Text style={[styles.weekday, selected && styles.weekdaySelected]}>
-              {WEEKDAY[day.getDay()]}
+              {WEEKDAY_SHORT[day.getDay()]}
             </Text>
             <Text
               style={[

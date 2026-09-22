@@ -11,7 +11,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.sliftio.venus",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSLocationWhenInUseUsageDescription": "A Venus usa a sua localização para mostrar o clima de onde você está."
       }
     },
     "android": {
@@ -33,6 +34,13 @@
           "image": "./assets/splash-icon.png",
           "resizeMode": "contain",
           "backgroundColor": "#0C0C25"
+        }
+      ],
+      "expo-sqlite",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "A Venus usa a sua localização para mostrar o clima de onde você está."
         }
       ]
     ],
