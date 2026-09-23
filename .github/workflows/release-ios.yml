@@ -8,22 +8,38 @@ name: Release iOS (.ipa)
 # Ao final, atualiza docs/source.json (versao, data, tamanho, URL) e faz commit,
 # entao o GitHub Pages passa a oferecer a nova versao na AltStore automaticamente.
 #
-# Dispare criando uma tag:  git tag v1.0.0 && git push origin v1.0.0
-# ou manualmente pela aba Actions (gera uma pre-release "dev-N").
+# Disparo:
+#   - merge/push na main  -> release automatica. A versao e o maior entre
+#     (ultima tag vX.Y.Z + 1 patch) e o "version" do app.json; para subir
+#     minor/major basta alterar o "version" do app.json no PR.
+#   - push de tag vX.Y.Z  -> release com exatamente essa versao.
+#   - manual (aba Actions) -> na main, igual ao merge; em outra branch gera uma
+#     pre-release "dev-N" (sem atualizar a source).
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
   workflow_dispatch:
 
 permissions:
   contents: write
+
+# Uma release por vez, para duas merges seguidas nao calcularem a mesma versao.
+concurrency:
+  group: release-ios
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # precisamos das tags para calcular a proxima versao
 
       - name: Select Xcode 26.4+ (Expo SDK 57 / RN 0.86 requer 26.4 ou superior)
         run: |
@@ -39,6 +55,49 @@ jobs:
           done
           echo "Nenhum Xcode 26.4+ encontrado no runner."
           exit 1
+
+      - name: Compute release version
+        id: meta
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+            KIND=release
+          elif [ "${{ github.ref_name }}" = "main" ]; then
+            LAST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+            VERSION=$(node -e '
+              const parse = s => (s || "0.0.0").replace(/^v/, "").split(".").map(Number);
+              const cmp = (a, b) => a[0]-b[0] || a[1]-b[1] || a[2]-b[2];
+              const last = parse(process.argv[1]);
+              const bumped = [last[0], last[1], last[2] + 1];
+              const app = parse(require("./app.json").expo.version);
+              console.log((cmp(app, bumped) > 0 ? app : bumped).join("."));
+            ' "$LAST")
+            TAG="v$VERSION"
+            KIND=release
+          else
+            TAG="dev-${{ github.run_number }}"
+            KIND=dev
+          fi
+          VERSION="${TAG#v}"
+          echo "Ultima tag: ${LAST:-n/a} -> $TAG ($KIND)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "kind=$KIND" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      # A AltStore compara a versao da source com a do .ipa; carimbamos a versao e
+      # um build number crescente no app.json antes do prebuild (nao e commitado).
+      - name: Stamp version into app.json
+        if: steps.meta.outputs.kind == 'release'
+        run: |
+          node -e '
+            const fs = require("fs");
+            const cfg = JSON.parse(fs.readFileSync("app.json", "utf8"));
+            cfg.expo.version = process.argv[1];
+            cfg.expo.ios.buildNumber = process.argv[2];
+            fs.writeFileSync("app.json", JSON.stringify(cfg, null, 2) + "\n");
+          ' "${{ steps.meta.outputs.version }}" "${{ github.run_number }}"
+          grep -nE '"(version|buildNumber)"' app.json
 
       - uses: actions/setup-node@v4
         with:
@@ -71,39 +130,29 @@ jobs:
             build
 
       - name: Package .ipa
+        id: ipa
         run: |
           APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
           echo "App: $APP"
           mkdir -p Payload
           cp -R "$APP" Payload/
           zip -qry Venus.ipa Payload
-
-      - name: Compute release metadata
-        id: meta
-        run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
-            TAG="${{ github.ref_name }}"
-          else
-            TAG="dev-${{ github.run_number }}"
-          fi
-          VERSION="${TAG#v}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "size=$(stat -f%z Venus.ipa)" >> "$GITHUB_OUTPUT"
-          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: Venus.ipa
           tag_name: ${{ steps.meta.outputs.tag }}
-          prerelease: ${{ github.ref_type != 'tag' }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          prerelease: ${{ steps.meta.outputs.kind == 'dev' }}
           fail_on_unmatched_files: true
 
-      - name: Update AltStore source.json (only on version tags)
-        if: github.ref_type == 'tag'
+      - name: Update AltStore source.json (only on versioned releases)
+        if: steps.meta.outputs.kind == 'release'
         run: |
-          node - "${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.date }}" "${{ steps.meta.outputs.size }}" "${{ steps.meta.outputs.tag }}" <<'EOF'
+          node - "${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.date }}" "${{ steps.ipa.outputs.size }}" "${{ steps.meta.outputs.tag }}" <<'EOF'
           const fs = require('fs');
           const [version, date, size, tag] = process.argv.slice(2);
           const path = 'docs/source.json';
@@ -123,10 +172,15 @@ jobs:
           app.versions = app.versions.filter(v => !seen.has(v.version) && seen.add(v.version));
           fs.writeFileSync(path, JSON.stringify(src, null, 2) + '\n');
           EOF
+          git checkout -- app.json # desfaz o carimbo de versao (senao o rebase falha)
           if ! git diff --quiet docs/source.json; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add docs/source.json
             git commit -m "Publica Venus ${{ steps.meta.outputs.version }} na source"
-            git push origin HEAD:main
+            # a main pode ter andado durante o build (ou o checkout e de uma tag)
+            for i in 1 2 3; do
+              git fetch origin main && git rebase origin/main && git push origin HEAD:main && break
+              sleep 5
+            done
           fi
