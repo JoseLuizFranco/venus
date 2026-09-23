@@ -22,6 +22,7 @@ on:
     tags: ["v*"]
     paths-ignore:
       - "docs/**"
+      - ".github/**"
       - "**.md"
   workflow_dispatch:
 
@@ -172,15 +173,22 @@ jobs:
           app.versions = app.versions.filter(v => !seen.has(v.version) && seen.add(v.version));
           fs.writeFileSync(path, JSON.stringify(src, null, 2) + '\n');
           EOF
-          git checkout -- app.json # desfaz o carimbo de versao (senao o rebase falha)
           if ! git diff --quiet docs/source.json; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add docs/source.json
             git commit -m "Publica Venus ${{ steps.meta.outputs.version }} na source"
+            # o build deixa arquivos rastreados modificados (app.json carimbado,
+            # prebuild etc.); descarta tudo para o rebase nao recusar
+            git reset --hard HEAD
             # a main pode ter andado durante o build (ou o checkout e de uma tag)
             for i in 1 2 3; do
-              git fetch origin main && git rebase origin/main && git push origin HEAD:main && break
+              if git fetch origin main && git rebase origin/main && git push origin HEAD:main; then
+                exit 0
+              fi
+              git rebase --abort 2>/dev/null || true
               sleep 5
             done
+            echo "::error::Nao foi possivel publicar docs/source.json na main"
+            exit 1
           fi
