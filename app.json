@@ -2,6 +2,7 @@
   "expo": {
     "name": "Venus",
     "slug": "venus",
+    "scheme": "venus",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,6 +14,11 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSLocationWhenInUseUsageDescription": "A Venus usa a sua localização para mostrar o clima de onde você está."
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.sliftio.venus"
+        ]
       }
     },
     "android": {
@@ -42,7 +48,8 @@
         {
           "locationWhenInUsePermission": "A Venus usa a sua localização para mostrar o clima de onde você está."
         }
-      ]
+      ],
+      "@bacons/apple-targets"
     ],
     "extra": {
       "eas": {

@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  Linking,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -28,6 +29,14 @@ import { colors, space, type } from './src/theme';
 
 type SheetKey = 'gym' | 'agenda' | 'weight' | 'reflection' | null;
 
+const SHEETS: SheetKey[] = ['gym', 'agenda', 'weight', 'reflection'];
+
+// Toque num widget da home screen abre o app em venus://<folha>.
+function sheetFromUrl(url: string | null): SheetKey {
+  const key = url?.match(/^venus:\/\/([a-z]+)/)?.[1] as SheetKey | undefined;
+  return key && SHEETS.includes(key) ? key : null;
+}
+
 export default function App() {
   return (
     <DbProvider>
@@ -46,6 +55,16 @@ function Home() {
   const weather = useWeather();
   const [selectedKey, setSelectedKey] = useState(todayKey);
   const [sheet, setSheet] = useState<SheetKey>(null);
+
+  useEffect(() => {
+    const open = (url: string | null) => {
+      const key = sheetFromUrl(url);
+      if (key) setSheet(key);
+    };
+    Linking.getInitialURL().then(open);
+    const sub = Linking.addEventListener('url', (e) => open(e.url));
+    return () => sub.remove();
+  }, []);
 
   const selectedDate = useMemo(
     () => days.find((d) => dateKey(d) === selectedKey) ?? today,

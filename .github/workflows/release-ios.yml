@@ -130,6 +130,23 @@ jobs:
             CODE_SIGN_ENTITLEMENTS="" \
             build
 
+      # O build sai sem assinatura, e sem assinatura nao ha entitlements no binario.
+      # A AltStore le os entitlements do binario para registrar o App Group
+      # (dados compartilhados app <-> widget); embutimos com ldid.
+      - name: Embed entitlements (App Group)
+        run: |
+          brew install ldid
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          EXE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")
+          ldid -S"ios/$EXE/$EXE.entitlements" "$APP/$EXE"
+          ls "$APP"/PlugIns/*.appex >/dev/null # falha se o widget nao foi embutido
+          for EXT in "$APP"/PlugIns/*.appex; do
+            EXT_EXE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$EXT/Info.plist")
+            ldid -S"ios/.targets/$EXT_EXE/generated.entitlements" "$EXT/$EXT_EXE"
+            echo "== $EXT_EXE"; ldid -e "$EXT/$EXT_EXE"
+          done
+          echo "== $EXE"; ldid -e "$APP/$EXE"
+
       - name: Package .ipa
         id: ipa
         run: |
