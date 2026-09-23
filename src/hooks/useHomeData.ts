@@ -11,6 +11,7 @@ import {
 import { latestWeight, type WeightEntry } from '../db/weights';
 import { listWorkouts, type Workout } from '../db/workouts';
 import { addDays, dateKey, daysBetween, parseKey, startOfWeek } from '../dates';
+import { syncWidgets } from '../widgets';
 
 export type HomeData = {
   workouts: Workout[];
@@ -53,6 +54,7 @@ export function useHomeData(today: Date): HomeData {
     setReflection(r);
     setAnniversary(a);
     setLoaded(true);
+    syncWidgets(w, a);
   }, [db, today, weekFrom, weekTo]);
 
   useEffect(() => {

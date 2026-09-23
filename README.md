@@ -63,9 +63,27 @@ Para publicar uma nova versão:
 ## CI/CD
 
 - **`.github/workflows/ci.yml`** — a cada push/PR: type-check, `expo-doctor` e bundle de iOS.
-- **`.github/workflows/release-ios.yml`** — em tags `v*` (ou disparo manual): compila o `.ipa`
-  não-assinado no runner macOS, publica a Release e atualiza a source. **Sem secrets, sem
-  conta Apple.**
+- **`.github/workflows/release-ios.yml`** — a cada merge na `main` (ou tag `v*`, ou disparo
+  manual): compila o `.ipa` não-assinado no runner macOS, publica a Release e atualiza a
+  source. **Sem secrets, sem conta Apple.**
+
+## Widgets da home screen
+
+Extensão WidgetKit em SwiftUI (`targets/widget/`, gerada no `expo prebuild` pelo
+`@bacons/apple-targets`), com dois widgets pequenos:
+
+- **Together** — dias de namoro e uma expressão em mandarim que muda à meia-noite (lista em
+  `TogetherWidget.swift`).
+- **Academia** — treinos feitos na semana (seg → dom) e o próximo da fila.
+
+O app grava um snapshot (data de início + treinos) no App Group `group.com.sliftio.venus`
+via o módulo local `modules/widget-bridge` sempre que a home recarrega. A AltStore registra
+o grupo como `group.com.sliftio.venus.<TEAMID>` e informa o nome real em `ALTAppGroups` no
+`Info.plist`; app e widget resolvem o grupo por aí. Como o `.ipa` sai sem assinatura, o CI
+embute os entitlements nos binários com `ldid` para a AltStore enxergar o App Group.
+
+Com Apple ID grátis, app + widget ocupam **2 dos 3 App IDs** ativos permitidos.
+Tocar num widget abre a folha correspondente no app (`venus://gym`, `venus://reflection`).
 
 ## Estrutura
 
@@ -85,6 +103,9 @@ src/hooks/useWeather.ts     # clima no header; atualiza ao voltar ao primeiro pl
 src/components/             # CheckRow, WeekStrip, QuickAccess, Sheet, Field, TextButton…
 src/screens/                # folhas modais: GymSheet, AgendaSheet, WeightSheet, ReflectionSheet
 assets/logo.png             # logo da Venus
+src/widgets.ts              # snapshot enviado aos widgets da home screen
+modules/widget-bridge/      # módulo nativo local: grava no App Group + recarrega o WidgetKit
+targets/widget/             # extensão WidgetKit (SwiftUI): Together e Academia
 docs/                       # site do GitHub Pages = source do AltStore
 .github/workflows/          # CI e release do .ipa
 ```
